@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""
-diario — TUI interactivo para el diario de prácticas en gdcan.org
-
-Instalar:
-    pip install playwright textual rich
-    python3 -m playwright install chromium
-    chmod +x diario && mv diario ~/.local/bin/
-"""
 import asyncio, json, sys, time, threading
 from datetime import datetime
 from pathlib import Path
