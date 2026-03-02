@@ -345,6 +345,9 @@ def _week_key(date_str: str) -> Optional[Tuple[int, int]]:
     except Exception:
         return None
 
+def _now_stamp() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
 # ── CSS ───────────────────────────────────────────────────────────────────────
 CSS = """
 Screen {
@@ -401,6 +404,27 @@ LoginScreen {
 #dash-table-container {
     height: 1fr;
     padding: 0 1;
+}
+#dash-metrics {
+    height: 3;
+    padding: 0 1;
+    background: $surface-darken-1;
+}
+.metric {
+    width: 1fr;
+    height: 3;
+    content-align: center middle;
+    border: round $primary-darken-2;
+    margin: 0 1;
+}
+#metric-pending {
+    color: ansi_bright_yellow;
+}
+#metric-guardado {
+    color: ansi_bright_green;
+}
+#metric-confirmado {
+    color: ansi_bright_cyan;
 }
 #dash-status {
     height: 1;
@@ -543,6 +567,34 @@ ConfirmModal {
 #confirm-buttons Button {
     margin: 0 1;
 }
+
+/* ── Help Modal ────────────────────────────── */
+HelpModal {
+    align: center middle;
+}
+#help-box {
+    width: 78;
+    height: 24;
+    border: round $primary;
+    background: $surface-darken-1;
+    padding: 1 2;
+}
+#help-title {
+    width: 100%;
+    text-style: bold;
+    color: $accent;
+    padding-bottom: 1;
+}
+#help-markdown {
+    width: 100%;
+    height: 1fr;
+    padding: 0 1;
+}
+#help-buttons {
+    width: 100%;
+    height: 3;
+    align: right middle;
+}
 """
 
 # ── Status helpers ────────────────────────────────────────────────────────────
@@ -564,6 +616,28 @@ def status_text(s: str) -> Text:
     t = Text()
     t.append(f"{icon} {label}", style=color)
     return t
+
+
+class HelpModal(ModalScreen):
+    """Modal simple de ayuda y atajos."""
+
+    BINDINGS = [Binding("escape,h", "dismiss", "Cerrar")]
+
+    def __init__(self, title: str, markdown_text: str):
+        super().__init__()
+        self._title = title
+        self._markdown_text = markdown_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-box"):
+            yield Label(f"❓ {self._title}", id="help-title")
+            yield Markdown(self._markdown_text, id="help-markdown")
+            with Horizontal(id="help-buttons"):
+                yield Button("Cerrar [Esc]", id="btn-help-close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "btn-help-close":
+            self.dismiss(None)
 
 # ── Edit Modal ────────────────────────────────────────────────────────────────
 class EditModal(ModalScreen):
@@ -698,6 +772,7 @@ class DayScreen(Screen):
         Binding("c",         "confirm",      "Confirmar día"),
         Binding("r",         "refresh",      "Recargar"),
         Binding("n",         "next_empty",   "Siguiente vacía"),
+        Binding("h",         "show_help",    "Ayuda"),
     ]
 
     def __init__(self, client: GdcanClient, url_id: str, date: str):
@@ -763,6 +838,7 @@ class DayScreen(Screen):
             return
 
         table = DataTable(id="day-table", cursor_type="row")
+        table.zebra_stripes = True
         table.add_columns("", "Actividad", "Descripción")
         self._activity_widgets = []
         self._row_order = []
@@ -935,8 +1011,21 @@ class DayScreen(Screen):
         await self.query_one("#day-scroll").mount(LoadingIndicator(id="day-loading"))
         self.run_worker(self._load_detail())
 
+    def action_show_help(self):
+        self.app.push_screen(HelpModal(
+            "Atajos — detalle de día",
+            """
+- **Enter**: editar actividad
+- **n**: saltar a la siguiente actividad vacía
+- **c**: confirmar día
+- **r**: recargar
+- **Esc** o **b**: volver
+- **h**: abrir/cerrar ayuda
+            """.strip()
+        ))
+
     def _set_status(self, msg: str):
-        self.query_one("#day-status", Static).update(f"  {msg}")
+        self.query_one("#day-status", Static).update(f"  {msg} · {_now_stamp()}")
 
 
 # ── Dashboard Screen ──────────────────────────────────────────────────────────
@@ -947,6 +1036,7 @@ class DashboardScreen(Screen):
         Binding("v",         "view_day",  "Ver día"),
         Binding("c",         "confirm",   "Confirmar"),
         Binding("r",         "refresh",   "Recargar"),
+        Binding("h",         "show_help", "Ayuda"),
         Binding("q,ctrl+c",  "quit",      "Salir"),
     ]
 
@@ -962,6 +1052,10 @@ class DashboardScreen(Screen):
             f"📖  Diario de Prácticas  [{name}]",
             id="dash-header"
         )
+        with Horizontal(id="dash-metrics"):
+            yield Static("⬜ Pendientes: 0", id="metric-pending", classes="metric")
+            yield Static("✅ Guardados: 0", id="metric-guardado", classes="metric")
+            yield Static("🔒 Confirmados: 0", id="metric-confirmado", classes="metric")
         with Container(id="dash-table-container"):
             yield LoadingIndicator(id="dash-loading")
         yield Static("Cargando días...", id="dash-status")
@@ -979,6 +1073,9 @@ class DashboardScreen(Screen):
             pending   = sum(1 for d in days if d["status"] == "pendiente")
             guardados = sum(1 for d in days if d["status"] == "guardado")
             confirmed = sum(1 for d in days if d["status"] == "confirmado")
+            self.query_one("#metric-pending", Static).update(f"⬜ Pendientes: {pending}")
+            self.query_one("#metric-guardado", Static).update(f"✅ Guardados: {guardados}")
+            self.query_one("#metric-confirmado", Static).update(f"🔒 Confirmados: {confirmed}")
             # Update header with live stats
             name = self.client.user_name or "Usuario"
             self.query_one("#dash-header", Static).update(
@@ -1004,6 +1101,7 @@ class DashboardScreen(Screen):
             pass
 
         table = DataTable(id="dash-table", cursor_type="row")
+        table.zebra_stripes = True
         table.add_columns("Fecha", "Estado", "")
 
         prev_week: Optional[Tuple[int, int]] = None
@@ -1082,18 +1180,30 @@ class DashboardScreen(Screen):
     def action_refresh(self):
         self.run_worker(self._load_days())
 
+    def action_show_help(self):
+        self.app.push_screen(HelpModal(
+            "Atajos — pantalla principal",
+            """
+- **Enter** o **v**: abrir día
+- **c**: confirmar día seleccionado
+- **r**: recargar listado
+- **q** / **Ctrl+C**: salir
+- **h**: abrir/cerrar ayuda
+            """.strip()
+        ))
+
     def action_quit(self):
         self.app.exit()
 
     def _set_status(self, msg: str):
-        self.query_one("#dash-status", Static).update(f"  {msg}")
+        self.query_one("#dash-status", Static).update(f"  {msg} · {_now_stamp()}")
 
 
 # ── Login Screen ──────────────────────────────────────────────────────────────
 class LoginScreen(Screen):
     """Pantalla de login."""
 
-    BINDINGS = [Binding("escape", "quit", "Salir")]
+    BINDINGS = [Binding("escape", "quit", "Salir"), Binding("h", "show_help", "Ayuda")]
 
     def __init__(self, client: GdcanClient):
         super().__init__()
@@ -1145,6 +1255,17 @@ class LoginScreen(Screen):
             self.query_one("#login-status", Label).update("⚠️  Introduce DNI y contraseña")
             return
         self.run_worker(self._do_login(dni, clave))
+
+    def action_show_help(self):
+        self.app.push_screen(HelpModal(
+            "Ayuda — login",
+            """
+- Escribe tu **DNI** y **contraseña**
+- Pulsa **Enter** en contraseña o botón **Entrar**
+- **Esc**: salir
+- **h**: abrir/cerrar ayuda
+            """.strip()
+        ))
 
     async def _do_login(self, dni: str, clave: str):
         status = self.query_one("#login-status", Label)
